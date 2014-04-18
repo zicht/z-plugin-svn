@@ -1,0 +1,14 @@
+{
+    "name": "zicht/z-plugin-svn",
+    "description": "SVN plugin for Z",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Gerard van Helden",
+            "email": "gerard@zicht.nl"
+        }
+    ],
+    "require": {
+
+    }
+}
