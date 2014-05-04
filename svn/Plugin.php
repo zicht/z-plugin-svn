@@ -157,24 +157,5 @@ class Plugin extends BasePlugin
                 return $ret;
             }
         );
-        $container->method(
-            array('vcs.path'),
-            function($container) {
-                var_dump($container->helperExec('svn info ' . $container->resolve('vcs.url') . ' | grep "Root: "'));
-                die();
-//                return ;
-            }
-        );
-        $container->method(
-            array('vcs', 'diff'),
-            function($container, $from, $to, $verbose = true) {
-                return sprintf(
-                    'svn diff %s %s %s',
-                    $verbose ? '' : '--summarize ',
-                    escapeshellarg($container->call('vcs.abs', $from)),
-                    escapeshellarg($container->call('vcs.abs', $to))
-                );
-            }
-        );
     }
 }

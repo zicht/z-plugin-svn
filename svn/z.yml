@@ -1,3 +1,5 @@
+# @version ">=2.0"
+
 # Version Control System settings
 vcs:
     # The SVN url to the project. You can overwrite this in your own z.yml,
@@ -11,38 +13,46 @@ vcs:
 tasks:
     # Create a working copy of the specified version to the build dir
     _vcs.build:
-        set:
+        args:
             _mode: is_dir(cat(build.dir, "/.svn")) ? "update" : "checkout"
         do:
             - ?(_mode == "checkout")    @_vcs.checkout_build
             - ?(_mode == "update")      @_vcs.update_build
             - @_vcs.assert_clean
+            - cd $(build.dir) && svn st > $(vcs.export.revfile)
         yield: build.dir
+
 
     _vcs.update_build:
         - echo "Updating $(build.dir) to $(build.version)\n";
         - cd $(build.dir) && svn sw $(vcs.url)/$(build.version)
+        - @_vcs.cleanup
 
     _vcs.checkout_build:
-#        - mkdir -p $$(dirname $(build.dir));
         - echo "Checking out version $(build.version) to $(build.dir)";
         - svn checkout $(!verbose ? "-q") $(vcs.url)/$(build.version) $(build.dir)
         - @_vcs.assert_clean
 
+    _vcs.cleanup:
+        do:
+            - cd $(build.dir) && svn revert -R .
+            - cd $(build.dir) && svn st | egrep '\?' | awk '{print $2}' | xargs rm -rf
+            - cd $(build.dir) && svn cleanup
+
     _vcs.assert_clean:
-        set:
+        args:
             _state: is_dir(build.dir) ? sh(sprintf("svn st %s || true", build.dir))) : ""
         do:
             - '?(_state != "") echo "Build is not clean:"; echo "$(_state)"'
             - '?(_state != "") $(confirm("Modified files will be included in the build. Continue anyway?") ? "true" : abort)'
 
     # Create a version branch
-    v.branch:
+    vcs.branch:
         help: |
             Create a branch of the current working revision.
 
             Note that if the working copy is updated you should take care that you are actually tagging the right revision.
-        set:
+        args:
             branch:     ?
             _tgt:       sprintf("%s/branches/%s", vcs.url, branch)
             _src:       ? sprintf("%s/%s", vcs.url, vcs.current)
@@ -53,7 +63,7 @@ tasks:
             - ?(switch) svn sw $(_tgt)
 
     # Create a version tag
-    v.tag:
+    vcs.tag:
         help: |
             Tags the current working revision
 
@@ -61,7 +71,7 @@ tasks:
             (i.e. child dirs are committed, but the root is not updated), which might cause the wrong
             revision to be branched.
 
-        set:
+        args:
             tag:        ?
             _tgt:       sprintf("%s/tags/%s", vcs.url, tag)
             _src:       sprintf("%s/%s", vcs.url, vcs.current)
@@ -70,14 +80,14 @@ tasks:
             - svn cp $(_src) $(_tgt) -m"(Z) Created tag '$(tag)' from $(vcs.current)"
 
     # List all versions
-    v.versions:
+    vcs.versions:
         help: |
             List all available tags and branches
         do:
             - svn ls $(vcs.url)/tags     | awk '{print "tags/" $1}'
             - svn ls $(vcs.url)/branches | awk '{print "branches/" $1}'
 
-    v.version:
+    vcs.version:
         help: |
             Display current local working version.
 
@@ -87,17 +97,25 @@ tasks:
             - ?(!verbose) echo $(versionof(cwd, verbose))
 
     # Diff to specific version
-    v.diff:
+    vcs.diff:
         help: |
             Diff two versions
-        set:
+        args:
             version:   ?
+            compare_to: ? vcs.current
         do:
-            - $(vcs.diff(version, vcs.current, verbose))
+            - $(vcs.diff(version, compare_to, verbose))
 
     # Print the url of the project
-    v.url:
+    vcs.url:
         help: "Print the svn url of the project"
-        set:
+        args:
             _path: ? ""
         do: echo $(vcs.url)/$(_path)
+
+
+    vcs.switch:
+        help: "Switch to the specified version"
+        args:
+            version:   ?
+        do: svn sw $(vcs.url)/$(version)
