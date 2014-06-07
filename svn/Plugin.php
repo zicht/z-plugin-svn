@@ -161,13 +161,13 @@ class Plugin extends BasePlugin
                 list(,$rev) = explode('@', $ret);
                 if ($lastRev > $rev) {
                     trigger_error(
-                        E_USER_WARNING,
                         sprintf(
                             "Mixed revision working copy.\n"
                             . "The last revision number is <info>@{$lastRev}</info>\n"
                             . "Your working copy root is   <info>@{$rev}</info>.\n"
                             . "You should consider updating your working copy.\n"
-                        )
+                        ),
+                        E_USER_WARNING
                     );
                 }
 
