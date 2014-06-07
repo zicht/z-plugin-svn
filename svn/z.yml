@@ -81,7 +81,7 @@ tasks:
     vcs.versions:
         help: |
             List all available tags and branches
-        do: echo '$(join("\n", vcs.versions()))'
+        do: echo '$(join("\n", vcs.versions))'
 
     vcs.current:
         help: |
