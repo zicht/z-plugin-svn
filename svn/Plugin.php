@@ -86,6 +86,22 @@ class Plugin extends BasePlugin
                 return null;
             }
         );
+        $container->decl(array('vcs', 'versions'), function($c) {
+            $versions = explode(
+                "\n",
+                $c->helperExec(
+                    sprintf(
+                        '(svn ls %1$s/tags              | sed \'s!/$!!g\' | awk \'{print $1}\' )'
+                            . '&&  (svn ls %1$s/branches    | sed \'s!/$!!g\' | awk \'{print "dev-"$1}\' )',
+                        $c->resolve(array('vcs', 'url'))
+                    )
+                )
+            );
+
+            usort($versions, array('Zicht\Version\Version', 'isConform'));
+            usort($versions, array('Zicht\Version\Version', 'compare'));
+            return $versions;
+        });
         $container->method(
             array('versionof'),
             function($container, $dir) {
@@ -144,9 +160,10 @@ class Plugin extends BasePlugin
                 list($lastRev, $file) = $container->call($container->get(array('svn', 'wc', 'lastchange')), $container->resolve('cwd'));
                 list(,$rev) = explode('@', $ret);
                 if ($lastRev > $rev) {
-                    $container->output->writeln(
+                    trigger_error(
+                        E_USER_WARNING,
                         sprintf(
-                            "<comment>Warning: Mixed revision working copy.</comment>\n"
+                            "Mixed revision working copy.\n"
                             . "The last revision number is <info>@{$lastRev}</info>\n"
                             . "Your working copy root is   <info>@{$rev}</info>.\n"
                             . "You should consider updating your working copy.\n"

@@ -22,7 +22,6 @@ tasks:
             - cd $(build.dir) && svn st > $(vcs.export.revfile)
         yield: build.dir
 
-
     _vcs.update_build:
         - echo "Updating $(build.dir) to $(build.version)\n";
         - cd $(build.dir) && svn sw $(vcs.url)/$(build.version)
@@ -30,14 +29,13 @@ tasks:
 
     _vcs.checkout_build:
         - echo "Checking out version $(build.version) to $(build.dir)";
-        - svn checkout $(!verbose ? "-q") $(vcs.url)/$(build.version) $(build.dir)
+        - svn checkout $(!VERBOSE ? "-q") $(vcs.url)/$(build.version) $(build.dir)
         - @_vcs.assert_clean
 
     _vcs.cleanup:
-        do:
-            - cd $(build.dir) && svn revert -R .
-            - cd $(build.dir) && svn st | egrep '\?' | awk '{print $2}' | xargs rm -rf
-            - cd $(build.dir) && svn cleanup
+        - cd $(build.dir) && svn revert -R .
+        - cd $(build.dir) && svn st | egrep '\?' | awk '{print $2}' | xargs rm -rf
+        - cd $(build.dir) && svn cleanup
 
     _vcs.assert_clean:
         args:
@@ -83,18 +81,16 @@ tasks:
     vcs.versions:
         help: |
             List all available tags and branches
-        do:
-            - svn ls $(vcs.url)/tags     | awk '{print "tags/" $1}'
-            - svn ls $(vcs.url)/branches | awk '{print "branches/" $1}'
+        do: echo '$(join("\n", vcs.versions()))'
 
-    vcs.version:
+    vcs.current:
         help: |
             Display current local working version.
 
         do:
-            - ?(verbose) svn st
-            - ?(verbose) echo working copy version $(versionof(cwd, verbose)), latest change $(svn.wc.lastchange(cwd))
-            - ?(!verbose) echo $(versionof(cwd, verbose))
+            - ?(VERBOSE) svn st
+            - ?(VERBOSE) echo working copy version $(versionof(cwd, VERBOSE)), latest change $(svn.wc.lastchange(cwd))
+            - ?(!VERBOSE) echo $(versionof(cwd, VERBOSE))
 
     # Diff to specific version
     vcs.diff:
@@ -104,7 +100,7 @@ tasks:
             version:   ?
             compare_to: ? vcs.current
         do:
-            - $(vcs.diff(version, compare_to, verbose))
+            - $(vcs.diff(version, compare_to, VERBOSE))
 
     # Print the url of the project
     vcs.url:
