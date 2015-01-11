@@ -16,8 +16,8 @@ tasks:
         args:
             _mode: is_dir(cat(build.dir, "/.svn")) ? "update" : "checkout"
         do:
-            - ?(_mode == "checkout")    @_vcs.checkout_build
-            - ?(_mode == "update")      @_vcs.update_build
+            - @(if _mode == "checkout")    @_vcs.checkout_build
+            - @(if _mode == "update")      @_vcs.update_build
             - @_vcs.assert_clean
             - cd $(build.dir) && svn st > $(vcs.export.revfile)
         yield: build.dir
@@ -41,8 +41,8 @@ tasks:
         args:
             _state: is_dir(build.dir) ? sh(sprintf("svn st %s || true", build.dir))) : ""
         do:
-            - '?(_state != "") echo "Build is not clean:"; echo "$(_state)"'
-            - '?(_state != "") $(confirm("Modified files will be included in the build. Continue anyway?") ? "true" : abort)'
+            - '@(if _state != "") echo "Build is not clean:"; echo "$(_state)"'
+            - '@(if _state != "") $(confirm("Modified files will be included in the build. Continue anyway?") ? "true" : abort)'
 
     # Create a version branch
     vcs.branch:
@@ -57,8 +57,8 @@ tasks:
         flags:
             switch: true
         do:
-            - svn cp $(_src) $(_tgt) -m"(Z) Created branch '$(branch)' from $(vcs.current)"
-            - ?(switch) svn sw $(_tgt)
+            - svn cp $(_src) $(_tgt)
+            - @(if switch) svn sw $(_tgt)
 
     # Create a version tag
     vcs.tag:
@@ -75,7 +75,7 @@ tasks:
             _src:       sprintf("%s/%s", vcs.url, vcs.current)
 
         do:
-            - svn cp $(_src) $(_tgt) -m"(Z) Created tag '$(tag)' from $(vcs.current)"
+            - svn cp $(_src) $(_tgt)
 
     # List all versions
     vcs.versions:
@@ -88,9 +88,9 @@ tasks:
             Display current local working version.
 
         do:
-            - ?(VERBOSE) svn st
-            - ?(VERBOSE) echo working copy version $(versionof(cwd, VERBOSE)), latest change $(svn.wc.lastchange(cwd))
-            - ?(!VERBOSE) echo $(versionof(cwd, VERBOSE))
+            - @(if VERBOSE) svn st
+            - @(if VERBOSE) echo working copy version $(versionof(cwd, VERBOSE)), latest change $(svn.wc.lastchange(cwd))
+            - @(if !VERBOSE) echo $(versionof(cwd, VERBOSE))
 
     # Diff to specific version
     vcs.diff:
