@@ -39,7 +39,7 @@ tasks:
 
     _vcs.assert_clean:
         args:
-            _state: is_dir(build.dir) ? sh(sprintf("svn st %s || true", build.dir))) : ""
+            _state: is_dir(build.dir) ? sh(sprintf("svn st %s --ignore-externals | egrep -v '^X' || true", build.dir))) : ""
         do:
             - '@(if _state != "") echo "Build is not clean:"; echo "$(_state)"'
             - '@(if _state != "") $(confirm("Modified files will be included in the build. Continue anyway?") ? "true" : abort)'
@@ -57,7 +57,7 @@ tasks:
         flags:
             switch: true
         do:
-            - svn cp $(_src) $(_tgt)
+            - @(with true as INTERACTIVE) svn cp $(_src) $(_tgt)
             - @(if switch) svn sw $(_tgt)
 
     # Create a version tag
@@ -75,7 +75,7 @@ tasks:
             _src:       sprintf("%s/%s", vcs.url, vcs.current)
 
         do:
-            - svn cp $(_src) $(_tgt)
+            - @(with true as INTERACTIVE) svn cp $(_src) $(_tgt)
 
     # List all versions
     vcs.versions:
@@ -88,8 +88,8 @@ tasks:
             Display current local working version.
 
         do:
-            - @(if VERBOSE) svn st
-            - @(if VERBOSE) echo working copy version $(versionof(cwd, VERBOSE)), latest change $(svn.wc.lastchange(cwd))
+            - @(if VERBOSE)  svn st
+            - @(if VERBOSE)  echo working copy version $(versionof(cwd, VERBOSE)), latest change $(svn.wc.lastchange(cwd))
             - @(if !VERBOSE) echo $(versionof(cwd, VERBOSE))
 
     # Diff to specific version
