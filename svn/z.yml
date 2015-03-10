@@ -19,7 +19,7 @@ tasks:
             - @(if _mode == "checkout")    @_vcs.checkout_build
             - @(if _mode == "update")      @_vcs.update_build
             - @_vcs.assert_clean
-            - cd $(build.dir) && svn st > $(vcs.export.revfile)
+            - cd $(build.dir) && svn info > $(vcs.export.revfile)
         yield: build.dir
 
     _vcs.update_build:
