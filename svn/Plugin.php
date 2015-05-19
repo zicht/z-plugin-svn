@@ -98,8 +98,6 @@ class Plugin extends BasePlugin
                 )
             );
 
-//            $versions = array_filter(usort($versions, array('Zicht\Version\Version', 'isConform'));
-//            usort($versions, array('Zicht\Version\Version', 'compare'));
             return $versions;
         });
         $container->method(
