@@ -91,8 +91,8 @@ class Plugin extends BasePlugin
                 "\n",
                 $c->helperExec(
                     sprintf(
-                        '(svn ls %1$s/tags              | sed \'s!/$!!g\' | awk \'{print $1}\' )'
-                            . '&&  (svn ls %1$s/branches    | sed \'s!/$!!g\' | awk \'{print "dev-"$1}\' )',
+                        '(svn ls %1$s/tags              | sed \'s!/$!!g\' | awk \'{print "tags/"$1}\' )'
+                            . '&&  (svn ls %1$s/branches    | sed \'s!/$!!g\' | awk \'{print "branches/"$1}\' )',
                         $c->resolve(array('vcs', 'url'))
                     )
                 )
