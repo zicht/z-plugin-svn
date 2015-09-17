@@ -71,11 +71,12 @@ tasks:
 
         args:
             tag:        ?
+            message:    ? sprintf("(Z) Created tag '%s' from %s", tag, vcs.current)
             _tgt:       sprintf("%s/tags/%s", vcs.url, tag)
             _src:       sprintf("%s/%s", vcs.url, vcs.current)
 
         do:
-            - @(with true as INTERACTIVE) svn cp $(_src) $(_tgt)
+            - @(with true as INTERACTIVE) svn cp $(_src) $(_tgt) -m"$(message)"
 
     # List all versions
     vcs.versions:
