@@ -30,6 +30,7 @@ class Plugin extends BasePlugin
             ->children()
                 ->arrayNode('vcs')
                     ->children()
+                        ->scalarNode('svn_summary')->end()
                         ->scalarNode('url')->end()
                         ->arrayNode('export')
                             ->children()
@@ -47,6 +48,14 @@ class Plugin extends BasePlugin
      */
     public function setContainer(Container $container)
     {
+        if (!$container->resolve(array('vcs', 'svn_summary'))) {
+            $container->decl(
+                array('vcs', 'svn_summary'),
+                function (Container $c) {
+                    return realpath(__DIR__ . '/svn-summary');
+                }
+            );
+        }
         if (!$container->resolve(array('vcs', 'url'))) {
             $container->decl(
                 array('vcs', 'url'),
