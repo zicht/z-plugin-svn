@@ -1,0 +1,402 @@
+#!/usr/bin/env python3
+
+import collections
+from datetime import datetime, timedelta
+from os.path import expanduser
+from string import Formatter
+from xml.dom.minidom import parseString
+import argparse
+import inspect
+import re
+import sqlite3
+import subprocess
+
+def string_to_version_tuple(string):
+    '''Converts STRING into ([NUMBER, ..., NUMBER], [IDENTIFIER, NUMBER.., IDENTIFIER], FULL-STRING)
+
+    The return consists of a (NUMBERS, IDENTIFIERS, STRING) tuple, where NUMBERS is a list
+    containing only integers, IDENTIFIERS containing a mix of strings and integers, and STRING being
+    the original input version STRING.  This allow all strictly correct version numbers to be
+    ordered correctly, while incorrect version numbers still have a fair chance of resulting in a
+    correct order.
+
+    Examples of common/strict versions:
+    - '1.2' -> ([1, 2], ['zeta'], '1.2')
+    - '1.2.3-alpha.1' -> ([1, 2, 3], ['alpha', 1], '1.2.3-alpha.1')
+
+    Examples of uncommon (possibly incorrect) versions:
+    - '1.2.3-Alpha.1' -> ([1, 2, 3], ['alpha', 1], '1.2.3-Alpha.1')
+    - '1.2.x' -> ([1, 2], ['zeta'], '1.2.x')
+    - '1.2.x-alpha.1' -> ([1, 2], ['alpha', 1], '1.2.x-alpha.1')
+    - '1.2.3.4' -> ([1, 2, 3, 4], ['zeta'], '1.2.3.4')
+    - '1.2.3-rc.2.identifier' -> ([1, 2, 3], ['rc', 2, 'identifier'], '1.2.3-rc.2.identifier')
+    - '1.2.3-rc.3-identifier' -> ([1, 2, 3], ['rc', 3, 'identifier'], '1.2.3-rc.3-identifier')
+    - '1.2.3-rc.3_remark' -> ([1, 2, 3], ['rc', 3], '1.2.3-rc.3_remark')
+    - 'ver-1.2.3-beta.1' -> ([1, 2, 3], ['beta', 1], 'ver-1.2.3-beta.1')
+    '''
+    assert isinstance(string, str), type(string)
+    match = re.match('.*?(?P<numbers>[0-9]+(?:[.][0-9]+)*)(?:[^-]*)(?:-(?P<identifiers>[a-zA-Z0-9.-]+))?', string)
+    match = re.match('.*?(?P<numbers>[0-9]+(?:[.][0-9]+)*)(?:[^-]*)(?:-(?P<identifiers>[a-zA-Z][a-zA-Z0-9.-]+))?', string)
+    # match = re.match('.*?(?P<numbers>[0-9]+(?:[.][0-9]+)*)(?:[^-]*)(?:-(?P<identifiers>[a-zA-Z][a-zA-Z0-9-]+(?:.[0-9]+(?:.[a-zA-Z-]+))))?', string)
+    if match:
+        # numbers is a required group and hence always exists
+        numbers = [int(number)
+                   for number
+                   in re.split('[.]+', match.group('numbers'))]
+
+        # identifiers is an optional group
+        identifiers = match.group('identifiers')
+        if identifiers:
+            identifiers = re.split('[.-]+', identifiers.lower())
+            # the second identifiers *must* be an interer
+            if len(identifiers) >= 2:
+                if identifiers[1].isdigit():
+                    identifiers[1] = int(identifiers[1])
+                else:
+                    identifiers.insert(1, 0)
+        else:
+            identifiers = ['zeta']
+
+        return (numbers, identifiers, string)
+    return ([], [], string)
+
+# test parsing
+assert string_to_version_tuple('1.2') == ([1, 2], ['zeta'], '1.2')
+assert string_to_version_tuple('1.2.3-alpha.1') == ([1, 2, 3], ['alpha', 1], '1.2.3-alpha.1'), string_to_version_tuple('1.2.3-alpha.1')
+assert string_to_version_tuple('1.2.3-Alpha.1') == ([1, 2, 3], ['alpha', 1], '1.2.3-Alpha.1')
+assert string_to_version_tuple('1.2.x') == ([1, 2], ['zeta'], '1.2.x')
+assert string_to_version_tuple('1.2.x-alpha.1') == ([1, 2], ['alpha', 1], '1.2.x-alpha.1')
+assert string_to_version_tuple('1.2.3.4') == ([1, 2, 3, 4], ['zeta'], '1.2.3.4')
+assert string_to_version_tuple('1.2.3-rc.2.identifier') == ([1, 2, 3], ['rc', 2, 'identifier'], '1.2.3-rc.2.identifier')
+assert string_to_version_tuple('1.2.3-rc.3-identifier') == ([1, 2, 3], ['rc', 3, 'identifier'], '1.2.3-rc.3-identifier')
+assert string_to_version_tuple('1.2.3-rc.3_remark') == ([1, 2, 3], ['rc', 3], '1.2.3-rc.3_remark')
+assert string_to_version_tuple('ver-1.2.3-beta.1') == ([1, 2, 3], ['beta', 1], 'ver-1.2.3-beta.1')
+assert string_to_version_tuple('1.2.3.rc-1') == ([1, 2, 3], ['zeta'], '1.2.3.rc-1'), string_to_version_tuple('1.2.3.rc-1')
+# test ordering
+assert string_to_version_tuple('1.0.0-alpha') < string_to_version_tuple('1.0.0-alpha.1')
+assert string_to_version_tuple('1.0.0-alpha.1') < string_to_version_tuple('1.0.0-alpha.2')
+assert string_to_version_tuple('1.0.0-alpha.2') < string_to_version_tuple('1.0.0-alpha.10')
+assert string_to_version_tuple('1.0.0-beta.1') < string_to_version_tuple('1.0.0-beta.2')
+assert string_to_version_tuple('1.0.0-beta.2') < string_to_version_tuple('1.0.0-beta.10')
+assert string_to_version_tuple('1.0.0-beta.2') < string_to_version_tuple('1.0.0-rc.1')
+assert string_to_version_tuple('1.0.0-rc.1') < string_to_version_tuple('1.0.0-rc.2')
+assert string_to_version_tuple('1.0.0-rc.2') < string_to_version_tuple('1.0.0-rc.10')
+assert string_to_version_tuple('1.0.0-rc.2') < string_to_version_tuple('1.0.0')
+assert string_to_version_tuple('1.0.0') < string_to_version_tuple('1.0.1')
+# test comparisons when mixing integer and string
+assert string_to_version_tuple('1.0.0-alpha.1') < string_to_version_tuple('1.0.1-alpha.x')
+assert string_to_version_tuple('1.0.0-alpha.1') < string_to_version_tuple('1.0.1-1.alpha')
+
+class Cache(object):
+    class Entry(object):
+        def __init__(self, key, value, creation):
+            assert isinstance(key, str), type(key)
+            assert isinstance(value, bytes), type(value)
+            assert isinstance(creation, datetime), type(datetime)
+            self.key = key
+            self.value = value
+            self.creation = creation
+
+        def is_valid(self, lifetime):
+            assert isinstance(lifetime, timedelta), type(lifetime)
+            return datetime.utcnow() <= self.creation + lifetime
+
+        def __str__(self):
+            return self.value
+
+    def __init__(self, filepath):
+        assert isinstance(filepath, str), type(filepath)
+        self._connection = sqlite3.connect(expanduser(filepath), detect_types=sqlite3.PARSE_DECLTYPES)
+        self._connection.execute('CREATE TABLE IF NOT EXISTS cache (key TEXT PRIMARY KEY, value TEXT, creation TIMESTAMP)')
+
+    def __del__(self):
+        self._connection.commit()
+        self._connection.close()
+
+    def get(self, key, default=None):
+        assert isinstance(key, str), type(key)
+        row = self._connection.execute('SELECT value, creation FROM cache WHERE key = ?', (key,)).fetchone()
+        if row:
+            return self.Entry(key, row[0], row[1])
+        return default
+
+    def set(self, key, value):
+        assert isinstance(key, str), type(key)
+        assert isinstance(value, bytes), type(value)
+        creation = datetime.utcnow()
+        self._connection.execute('INSERT OR REPLACE INTO cache (key, value, creation) VALUES (?, ?, ?)', (key, value, creation))
+        return self.Entry(key, value, creation)
+
+    def remove(self, key):
+        assert isinstance(key, str), type(key)
+        self._connection.execute('DELETE FROM cache WHERE key = ?', (key,))
+        return True
+
+class TrivialNode(object):
+    def __init__(self, node, recursive=True, normalize=True):
+        self.attributes = dict()
+        if node.attributes:
+            items = [node.attributes.item(index) for index in range(node.attributes.length)]
+            self.attributes.update(dict((item.name.lower(), item.value) for item in items))
+
+        self.childrenDict = dict()
+        self.childrenList = list()
+        if node.childNodes:
+            items = [node.childNodes.item(index) for index in range(node.childNodes.length)]
+            nodes = [TrivialNode(item, recursive) for item in items]
+            self.childrenDict.update(dict((node._name, node) for node in nodes if node._name))
+            self.childrenList.extend(node for node in reversed(nodes) if not node._name.startswith('#'))
+
+        self._name = node.nodeName.lower()
+        self.value = ''
+        if node.nodeValue:
+            self.value = node.nodeValue
+        elif '#text' in self.childrenDict:
+            self.value = str(self.childrenDict['#text'])
+
+    def __iter__(self):
+        return iter(self.childrenList)
+
+    def __getitem__(self, key):
+        return self.childrenDict[key]
+
+    def __getattr__(self, key):
+        sources = [lambda: self.attributes[key],
+                   lambda: self.childrenDict[key],
+                   lambda: self.childrenList[int(key)]]
+
+        for source in sources:
+            try:
+                return source()
+            except:
+                pass
+
+        raise KeyError(key)
+
+    def __len__(self):
+        return len(self.childrenList)
+
+    def __str__(self):
+        return self.value
+
+    def __repr__(self):
+        return '<{name} attributes:[{attributes}] children:[{children}]>'.format(name=self._name,
+                                                                                 attributes=', '.join(self.attributes.keys()),
+                                                                                 children=', '.join(self.childrenDict.keys()))
+
+class SubversionRetriever(object):
+    def __init__(self, url, cache, lifetime):
+        assert isinstance(url, str), type(url)
+        assert isinstance(cache, Cache), type(cache)
+        assert isinstance(lifetime, timedelta), type(lifetime)
+        self._url = url
+        self._cache = cache
+        self._lifetime = lifetime
+        self._mapping = dict((name[4:], value)
+                             for name, value
+                             in inspect.getmembers(self, inspect.ismethod)
+                             if name.startswith('get_'))
+
+    def _get_from_command(self, cmd):
+        assert isinstance(cmd, str), type(cmd)
+        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, shell=True)
+        output, error = process.communicate()
+        return output
+
+    def _get_from_cache_or_command(self, cmd, lifetime=None):
+        assert isinstance(cmd, str), type(cmd)
+        assert lifetime is None or isinstance(lifetime, timedelta), type(lifetime)
+        entry = self._cache.get(cmd)
+        if entry and entry.is_valid(lifetime if lifetime else self._lifetime):
+            return entry
+        return self._cache.set(cmd, self._get_from_command(cmd))
+
+    def get_log(self, lifetime=None):
+        cmd = 'svn log --xml --verbose --stop-on-copy {url}'.format(url=self._url)
+        entry = self._get_from_cache_or_command(cmd, lifetime)
+        return TrivialNode(parseString(entry.value).documentElement)
+
+    def get_info(self, lifetime=None):
+        cmd = 'svn info --xml {url}'.format(url=self._url)
+        entry = self._get_from_cache_or_command(cmd, lifetime)
+        return TrivialNode(parseString(entry.value).getElementsByTagName('entry').item(0))
+
+    def get_list(self, lifetime=None, sort=None, tail=None):
+        cmd = 'svn list --xml {url}'.format(url=self._url)
+        entry = self._get_from_cache_or_command(cmd, lifetime)
+        entries = [TrivialNode(entry) for entry in parseString(entry.value).getElementsByTagName('entry')]
+
+        if sort:
+            key_map = {'alphabetical': lambda entry: str(entry.name),
+                       'version': lambda entry: string_to_version_tuple(str(entry.name))}
+            try:
+                entries.sort(key=key_map[sort])
+            except:
+                print('!!!error!!!')
+                for entry in entries:
+                    print('{} -> {}'.format(entry.name, string_to_version_tuple(str(entry.name))))
+                raise
+
+        if tail:
+            entries = entries[-tail:]
+
+        return entries
+
+    def get_mark(self):
+        return '{mark}'
+
+    def get(self, key):
+        func = self._mapping.get(key)
+        if func:
+            return func()
+        raise ValueError('Unknown key "{key}"'.format(key=key))
+
+class SubversionFormatter(Formatter):
+    def __init__(self, retriever, debug=False):
+        assert isinstance(retriever, SubversionRetriever)
+        self._retriever = retriever
+        self._debug = debug
+        self._filter_mapping = dict((name[8:], value)
+                                    for name, value
+                                    in inspect.getmembers(self, inspect.ismethod)
+                                    if name.startswith('_filter'))
+
+    def _unknown_filter(self, filter, _):
+        raise ValueError('Unknown filter "{filter}"'.format(filter=filter))
+
+    def _filter_verbatim(self, _, value):
+        return value
+
+    def _filter_length(self, _, value):
+        return len(value)
+
+    def _filter_commits(self, _, values):
+        count = len(values)
+        if count == 1:
+            return '{count} commit'.format(count=count)
+        else:
+            return '{count} commits'.format(count=count)
+
+    def _filter_authors(self, _, values):
+        authors = collections.defaultdict(int)
+        for value in values:
+            authors[str(value.author)] += 1
+        return ', '.join(tup[0] for tup in sorted(authors.items(), reverse=True, key=lambda tup: tup[1]))
+
+    def _filter_age(self, _, value):
+        delta = datetime.utcnow() - datetime.strptime(value.value, '%Y-%m-%dT%H:%M:%S.%fZ')
+        options = [(lambda: delta.days // 365, 'year', 'years'),
+                   (lambda: delta.days // 30, 'month', 'months'),
+                   (lambda: delta.days % 365, 'day', 'days'),
+                   (lambda: delta.seconds // 3600, 'hour', 'hours'),
+                   (lambda: delta.seconds // 60 % 60, 'minute', 'minutes'),
+                   (lambda: delta.seconds % 60, 'second', 'seconds'),
+                   (lambda: delta.microseconds, 'microsecond', 'microseconds')]
+        for func, unit, unit_plural in options:
+            value = func()
+            if value > 1:
+                return '{value} {unit}'.format(value=value, unit=unit_plural)
+            elif value == 1:
+                return '{value} {unit}'.format(value=value, unit=unit)
+        return '0 seconds'
+
+    def get_field(self, key, args, kwargs):
+        try:
+            if '|' in key:
+                key, filter = key.split('|', 1)
+                value = super().get_field(key, args, kwargs)
+                filtered_value = self._filter_mapping.get(filter, self._unknown_filter)(filter, value[0])
+                return (filtered_value,) + value[1:]
+            else:
+                return super().get_field(key, args, kwargs)
+        except Exception as exception:
+            if self._debug:
+                raise exception
+            return (repr(exception), exception)
+
+    def get_value(self, key, args, kwargs):
+        return self._retriever.get(key)
+
+class HelpFormatter(argparse.RawDescriptionHelpFormatter, argparse.ArgumentDefaultsHelpFormatter):
+    pass
+
+def main():
+    '''Lets get into some examples to figure out how all this stuff works!
+
+    FORMAT can contain {log|length} for the number of log entries at URL.
+    > svn-summary.py svn://svn.frayja.com/demo/trunk '{log|length} commits'
+
+    FORMAT can contain {log|authors} for a list of authors for the log entries at URL.  These
+    authors are ordered by frequency of occurrence.
+    > svn-summary.py svn://svn.frayja.com/demo/trunk 'authors: {log|authors}'
+
+    Adding --list will output one FORMAT for each directory contained within URL
+    > svn-summary.py svn://svn.frayja.com/demo/tags '{info.path} last commit {log.-1.date|age} ago by {log.-1.author}' --list
+    > svn-summary.py svn://svn.frayja.com/demo/tags '{info.path} first commit {log.0.date|age} ago by {log.-1.author}' --list
+
+    Example: mark when something comes from cache
+    Because {log.-1.date|age} can be confusing when retrieved from cache, it is possible to mark it
+    with "*" by adding {mark} anywhere within FORMAT.
+    > svn-summary.py svn://svn.frayja.com/demo/tags '{log.-1.date|age}{mark}'
+
+    '''
+    parser = argparse.ArgumentParser(description='Provides summaries for a Subversion repository',
+                                     formatter_class=HelpFormatter,
+                                     epilog=inspect.getdoc(main))
+    parser.add_argument('url', help='subversion path, i.e. svn://svn.frayja.com/environment')
+    parser.add_argument('format', help='summary format to display')
+    parser.add_argument('-d', '--debug', action='store_true', help='print full stack on exception')
+
+    group = parser.add_argument_group('optional list arguments')
+    group.add_argument('--list', action='store_true', help='apply --pattern to all links at URL/*')
+    group.add_argument('--sort', choices=['alphabetical', 'version'], help='sort the results from --list')
+    group.add_argument('--tail', metavar='N', type=int, default=128, help='show the last N entries from the list')
+
+    group = parser.add_argument_group('optional cache arguments')
+    group.add_argument('--cache', metavar='FILE', default='~/.frayja-cache.db', help='sqlite file to use for caching')
+    group.add_argument('--pattern-lifetime', metavar='MINUTES', required=False, type=int, default=15, help='number of minutes that the patterns cache is valid')
+    group.add_argument('--svn-lifetime', metavar='MINUTES', required=False, type=int, default=24*60, help='number of minutes that the svn cache is valid')
+    group.add_argument('--list-lifetime', metavar='MINUTES', required=False, type=int, default=0, help='number of minutes that the svn list cache is valid')
+    group.add_argument('--from-cache-marker', metavar='MARKER', required=False, type=str, default='*', help='{mark} is set to this value when the entry came from the cache')
+    group.add_argument('--not-from-cache-marker', metavar='MARKER', required=False, type=str, default='', help='{mark} is set to this value when the entry did *not* come from the cache')
+    args = parser.parse_args()
+
+    # format = 'length:{log|length} author:{log.0.author} date:{log.0.date|age}'
+    # print(formatter.format('{info.url}'))
+    # print(formatter.format('{log.0!r} {log.0.revision}'))
+    # print(formatter.format('{log.-1!r} {log.-1.msg}'))
+    # print(formatter.format('{log|length}'))
+    # print(formatter.format('{log.-1!r}'))
+    # print(formatter.format('{log.-1.date|age}'))
+    # print(formatter.format('{log.-2.date|age}'))
+    # print(formatter.format('{log.-10.date|age}'))
+    # print(formatter.format('{log.-100.date|age}'))
+    # print(formatter.format('{log.-200.date|age}'))
+    # svn-summary.py svn://svn.frayja.com/environment/local ' | environment/local/{info.path} ! {log.0.date|age} - {log.-1.date|age} ! {log|length} commits by {log|authors}' --list --sort version | column --separator ! --table
+
+    cache = Cache(args.cache)
+
+    if args.list:
+        retriever = SubversionRetriever(args.url, cache, timedelta(minutes=args.list_lifetime))
+        entries = [entry for entry in retriever.get_list(sort=args.sort, tail=args.tail) if entry.kind == 'dir']
+        urls = ['/'.join((args.url, str(entry.name))) for entry in entries]
+    else:
+        urls = [args.url]
+
+    for url in urls:
+        key = '-'.join((url, args.format))
+        entry = cache.get(key)
+        if entry and entry.is_valid(timedelta(minutes=args.pattern_lifetime)):
+            value = entry.value.decode('utf-8')
+            value = value.format(mark=args.from_cache_marker)
+        else:
+            retriever = SubversionRetriever(url, cache, timedelta(minutes=args.svn_lifetime))
+            formatter = SubversionFormatter(retriever, args.debug)
+            value = formatter.format(args.format)
+            cache.set(key, value.encode('utf-8'))
+            value = value.format(mark=args.not_from_cache_marker)
+
+        print(value)
+
+if __name__ == '__main__':
+    main()
