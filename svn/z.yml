@@ -120,12 +120,13 @@ tasks:
     vcs.tree:
         help: "Shows last 35 tags and all branches with a short summary"
         args:
+            tag_limit: ? 35
             tag_format: ? "{info.path} ! {log.0.date|age} - {log.-1.date|age}{mark} ! {log|commits} by {log|authors} ! from {log.0.paths.path.copyfrom-path}@{log.0.paths.path.copyfrom-rev}"
             branch_format: ? "{info.path} ! {log.0.date|age} - {log.-1.date|age}{mark} ! {log|commits} by {log|authors} ! from {log.0.paths.path.copyfrom-path}@{log.0.paths.path.copyfrom-rev}"
             trunk_format: ? "{info.path} ! {log.0.date|age} - {log.-1.date|age}{mark} ! {log|commits} by {log|authors}"
         do: |
             echo "\ $(vcs.url)/tags/"
-            $(vcs.svn_summary) $(vcs.url)/tags '$(tag_format)' --list --sort=version --tail=35 | column -t -s !
+            $(vcs.svn_summary) $(vcs.url)/tags '$(tag_format)' --list --sort=version --tail=$(tag_limit) | column -t -s !
             
             echo "\ $(vcs.url)/branches/"
             $(vcs.svn_summary) $(vcs.url)/branches '$(branch_format)' --list --sort=version --svn-lifetime=5 | column -t -s !
