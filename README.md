@@ -3,4 +3,4 @@
 Provides versioning tasks for Z with `svn`.
 
 # Maintainer(s)
-* Gerard van Helden <gerard@zicht.nl>
+* Philip Bergman <philip@zicht.nl>
